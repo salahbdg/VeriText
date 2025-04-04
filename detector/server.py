@@ -7,9 +7,8 @@ from transformers import RobertaForSequenceClassification, RobertaTokenizer
 import json
 import fire
 import torch
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 import torch.nn as nn
-
 
 model: RobertaForSequenceClassification = None
 tokenizer: RobertaTokenizer = None
@@ -18,57 +17,75 @@ device: str = None
 def log(*args):
     print(f"[{os.environ.get('RANK', '')}]", *args, file=sys.stderr)
 
-
 class RequestHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
-        query = unquote(urlparse(self.path).query)
+        # Parse the path and query
+        path = urlparse(self.path).path
+        query_params = parse_qs(urlparse(self.path).query)
 
-        if not query:
+        if path == '/':
+            # Serve the HTML file for the root path
             self.begin_content('text/html')
-
             html = os.path.join(os.path.dirname(__file__), 'index.html')
             self.wfile.write(open(html).read().encode())
             return
+        elif path == '/api/check':
+            # Handle API request for checking text
+            query = query_params.get('query', [''])[0]  # Get the 'query' parameter from URL
 
-        self.begin_content('application/json;charset=UTF-8')
+            if not query:
+                self.send_error(400, "Query parameter 'query' is required")
+                return
 
-        tokens = tokenizer.encode(query)
-        all_tokens = len(tokens)
-        tokens = tokens[:tokenizer.model_max_length - 2]
-        used_tokens = len(tokens)
-        tokens_tensor = torch.tensor([tokenizer.bos_token_id] + tokens + [tokenizer.eos_token_id]).unsqueeze(0)
-        mask = torch.ones_like(tokens_tensor)
+            self.begin_content('application/json;charset=UTF-8')
 
-        with torch.no_grad():
-            outputs = model(tokens_tensor.to(device), attention_mask=mask.to(device))
-            logits = outputs.logits if hasattr(outputs, 'logits') else outputs[1]
-            probs = logits.softmax(dim=-1)
-            fake, real = probs.detach().cpu().flatten().numpy().tolist()
+            tokens = tokenizer.encode(query)
+            all_tokens = len(tokens)
+            tokens = tokens[:tokenizer.model_max_length - 2]
+            used_tokens = len(tokens)
+            tokens_tensor = torch.tensor([tokenizer.bos_token_id] + tokens + [tokenizer.eos_token_id]).unsqueeze(0)
+            mask = torch.ones_like(tokens_tensor)
 
-            # Calculate perplexity and burstiness scores
-            if hasattr(outputs, 'loss') and outputs.loss is not None:
-                perplexity_score = torch.exp(outputs.loss).item()
-            else:
-                loss_fct = nn.CrossEntropyLoss()
-                labels = torch.tensor([1]).to(device)  # Assuming real label for perplexity calculation
-                loss = loss_fct(logits.view(-1, model.config.num_labels), labels.view(-1))
-                perplexity_score = torch.exp(loss).item()
+            with torch.no_grad():
+                outputs = model(tokens_tensor.to(device), attention_mask=mask.to(device))
+                logits = outputs.logits if hasattr(outputs, 'logits') else outputs[1]
+                probs = logits.softmax(dim=-1)
+                fake, real = probs.detach().cpu().flatten().numpy().tolist()
 
-            burstiness_score = self.calculate_burstiness(probs)
+                # Calculate perplexity and burstiness scores
+                if hasattr(outputs, 'loss') and outputs.loss is not None:
+                    perplexity_score = torch.exp(outputs.loss).item()
+                else:
+                    loss_fct = nn.CrossEntropyLoss()
+                    labels = torch.tensor([1]).to(device)  # Assuming real label for perplexity calculation
+                    loss = loss_fct(logits.view(-1, model.config.num_labels), labels.view(-1))
+                    perplexity_score = torch.exp(loss).item()
 
-            # Identify AI-written sentences
-            ai_lines = self.identify_ai_sentences(query)
+                burstiness_score = self.calculate_burstiness(probs)
 
-        self.wfile.write(json.dumps(dict(
-            all_tokens=all_tokens,
-            used_tokens=used_tokens,
-            real_probability=real,
-            fake_probability=fake,
-            perplexity_score=perplexity_score,
-            burstiness_score=burstiness_score,
-            ai_lines=ai_lines
-        )).encode())
+                # Identify AI-written sentences
+                ai_lines = self.identify_ai_sentences(query)
+
+            # Prepare and return JSON response
+            response_data = dict(
+                all_tokens=all_tokens,
+                used_tokens=used_tokens,
+                real_probability=real,
+                fake_probability=fake,
+                perplexity_score=perplexity_score,
+                burstiness_score=burstiness_score,
+                ai_lines=ai_lines
+            )
+
+            # print (response_data)
+            log('Response:', response_data)
+
+            self.wfile.write(json.dumps(response_data).encode())
+            return
+        else:
+            # Handle 404 for other paths
+            self.send_error(404, "Not Found")
 
     def calculate_burstiness(self, probs):
         # Calculate burstiness as the variance in the probabilities of tokens
@@ -96,7 +113,6 @@ class RequestHandler(SimpleHTTPRequestHandler):
                     ai_lines.append(i)
         return ai_lines
 
-
     def begin_content(self, content_type):
         self.send_response(200)
         self.send_header('Content-Type', content_type)
@@ -106,7 +122,6 @@ class RequestHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         log(format % args)
 
-
 def serve_forever(server, model, tokenizer, device):
     log('Process has started; loading the model ...')
     globals()['model'] = model.to(device)
@@ -115,7 +130,6 @@ def serve_forever(server, model, tokenizer, device):
 
     log(f'Ready to serve at http://localhost:{server.server_address[1]}')
     server.serve_forever()
-
 
 def main(checkpoint, port=8080, device='cuda' if torch.cuda.is_available() else 'cpu'):
     if checkpoint.startswith('gs://'):
@@ -137,7 +151,7 @@ def main(checkpoint, port=8080, device='cuda' if torch.cuda.is_available() else 
     print(f'Starting HTTP server on port {port}', file=sys.stderr)
     server = HTTPServer(('0.0.0.0', port), RequestHandler)
 
-    # avoid calling CUDA API before forking; doing so in a subprocess is fine.
+    # Avoid calling CUDA API before forking; doing so in a subprocess is fine.
     num_workers = int(subprocess.check_output([sys.executable, '-c', 'import torch; print(torch.cuda.device_count())']))
 
     if num_workers <= 1:
@@ -160,6 +174,6 @@ def main(checkpoint, port=8080, device='cuda' if torch.cuda.is_available() else 
         for process in subprocesses:
             process.join()
 
-
 if __name__ == '__main__':
     fire.Fire(main)
+    

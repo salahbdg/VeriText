@@ -11,9 +11,15 @@
         <button type="submit" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-all">Check</button>
     </form>
 
-    <div id="result" class="hidden mt-6 text-center">
-        <h3 class="text-xl font-semibold text-gray-800">Probability this is AI-generated:</h3>
-        <p id="probability" class="text-3xl text-blue-600 font-bold mt-2"></p>
+    <div id="result" class="hidden mt-6">
+        <h3 class="text-xl font-semibold text-gray-800">Results:</h3>
+        <p><strong>All Tokens:</strong> <span id="allTokens"></span></p>
+        <p><strong>Used Tokens:</strong> <span id="usedTokens"></span></p>
+        <p><strong>Real Probability:</strong> <span id="realProbability"></span></p>
+        <p><strong>Fake Probability:</strong> <span id="fakeProbability"></span></p>
+        <p><strong>Perplexity Score:</strong> <span id="perplexityScore"></span></p>
+        <p><strong>Burstiness Score:</strong> <span id="burstinessScore"></span></p>
+        <p><strong>AI-Generated Lines:</strong> <span id="aiLines"></span></p>
     </div>
 </div>
 
@@ -43,7 +49,16 @@
         });
         
         const data = await response.json();
-        document.getElementById("probability").innerText = data.probability + "%";
+
+        // Update the result section with all data
+        document.getElementById("allTokens").innerText = data.all_tokens;
+        document.getElementById("usedTokens").innerText = data.used_tokens;
+        document.getElementById("realProbability").innerText = (data.real_probability * 100).toFixed(2) + "%";
+        document.getElementById("fakeProbability").innerText = (data.fake_probability * 100).toFixed(2) + "%";
+        document.getElementById("perplexityScore").innerText = data.perplexity_score.toFixed(2);
+        document.getElementById("burstinessScore").innerText = data.burstiness_score.toFixed(2);
+        document.getElementById("aiLines").innerText = data.ai_lines.join(", ");
+
         document.getElementById("result").classList.remove("hidden");
     });
 </script>
