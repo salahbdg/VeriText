@@ -1,17 +1,19 @@
 {% extends "layout.html" %}
 
 {% block main %}
-<!-- CHECK-->
-<div class="container">
-    <h2>AI Text Probability Checker</h2>
-    <form id="textForm">
-        <label for="userText">Enter your text:</label>
-        <textarea id="userText" name="userText" rows="6"></textarea>
-        <button type="submit">Check</button>
+<div class="max-w-2xl mx-auto mt-10 p-6 bg-white rounded-2xl shadow-lg">
+    <h2 class="text-2xl font-semibold mb-6 text-center text-gray-800">🧠 AI Text Probability Checker</h2>
+
+    <form id="textForm" class="space-y-4">
+        <label for="userText" class="block text-gray-700 font-medium">Enter your text:</label>
+        <textarea id="userText" name="userText" rows="6" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Paste or write your text here..."></textarea>
+        <div id="error-message" class="text-red-500 mt-2 hidden">Text cannot be empty!</div>
+        <button type="submit" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-all">Check</button>
     </form>
-    <div id="result" class="hidden">
-        <h3>Probability that this text is AI-generated:</h3>
-        <p id="probability"></p>
+
+    <div id="result" class="hidden mt-6 text-center">
+        <h3 class="text-xl font-semibold text-gray-800">Probability this is AI-generated:</h3>
+        <p id="probability" class="text-3xl text-blue-600 font-bold mt-2"></p>
     </div>
 </div>
 
@@ -20,6 +22,20 @@
         event.preventDefault();
         
         const userText = document.getElementById("userText").value;
+
+        // If text is empty, show error message
+        if (userText.trim() === "") {
+            const errorMessage = document.getElementById("error-message");
+            errorMessage.classList.remove("hidden"); // Show the error message
+
+            // Hide the error message after 5 seconds
+            setTimeout(() => {
+                errorMessage.classList.add("hidden");
+            }, 5000);
+            return; // Stop form submission
+        }
+
+        // Proceed with the API call if the text is not empty
         const response = await fetch("/check_text", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -31,5 +47,4 @@
         document.getElementById("result").classList.remove("hidden");
     });
 </script>
-
 {% endblock %}
