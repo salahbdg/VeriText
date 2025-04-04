@@ -79,18 +79,23 @@ class RequestHandler(SimpleHTTPRequestHandler):
         sentences = text.split('\n')
         ai_lines = []
         for i, sentence in enumerate(sentences):
+            if not sentence.strip():  # Skip empty lines
+                continue
+
             tokens = tokenizer.encode(sentence)
             tokens_tensor = torch.tensor([tokenizer.bos_token_id] + tokens + [tokenizer.eos_token_id]).unsqueeze(0)
             mask = torch.ones_like(tokens_tensor)
 
             with torch.no_grad():
-                logits = model(tokens_tensor.to(device), attention_mask=mask.to(device))[0]
+                outputs = model(tokens_tensor.to(device), attention_mask=mask.to(device))
+                logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
                 sentence_probs = logits.softmax(dim=-1)
                 fake, real = sentence_probs.detach().cpu().flatten().numpy().tolist()
 
                 if fake > real:
                     ai_lines.append(i)
         return ai_lines
+
 
     def begin_content(self, content_type):
         self.send_response(200)
