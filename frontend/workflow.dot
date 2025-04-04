@@ -1,0 +1,45 @@
+digraph AI_Text_Detection_Workflow {
+    rankdir=UD;
+    node [shape=rectangle, style=filled, fillcolor=lightblue];
+    
+    subgraph cluster_frontend {
+        label="Frontend (User Interface)";
+        frontend [label="User Inputs Text\n(Web App / Client)"];
+        request [label="Send Text via API\n(POST /predict)"];
+        frontend -> request;
+    }
+    
+    subgraph cluster_backend {
+        label="Backend (Flask API)";
+        style=dashed;
+        api [label="Flask Server\n(app.py)"];
+        model_loader [label="Load Trained Model\n(joblib.load)"];
+        feature_extraction [label="Extract Features\n(Text Processing)"];
+        prediction [label="Make Prediction\n(model.predict_proba)"];
+        response [label="Return Probability\n(JSON Response)"];
+        
+        request -> api;
+        api -> model_loader;
+        api -> feature_extraction;
+        feature_extraction -> prediction;
+        prediction -> response;
+    }
+    
+    subgraph cluster_deployment {
+        label="Deployment";
+        style=dotted;
+        docker [label="Docker Container\n(Gunicorn + Flask)"];
+        cloud [label="Cloud Server\n(AWS / Render / Railway)"];
+        
+        response -> docker;
+        docker -> cloud;
+    }
+    
+    subgraph cluster_frontend_response {
+        label="Frontend Response";
+        display_result [label="Display AI Probability\n(e.g., 85% AI-Generated)"];
+        
+        cloud -> display_result;
+    }
+}
+ 

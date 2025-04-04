@@ -1,0 +1,35 @@
+{% extends "layout.html" %}
+
+{% block main %}
+<!-- CHECK-->
+<div class="container">
+    <h2>AI Text Probability Checker</h2>
+    <form id="textForm">
+        <label for="userText">Enter your text:</label>
+        <textarea id="userText" name="userText" rows="6"></textarea>
+        <button type="submit">Check</button>
+    </form>
+    <div id="result" class="hidden">
+        <h3>Probability that this text is AI-generated:</h3>
+        <p id="probability"></p>
+    </div>
+</div>
+
+<script>
+    document.getElementById("textForm").addEventListener("submit", async function(event) {
+        event.preventDefault();
+        
+        const userText = document.getElementById("userText").value;
+        const response = await fetch("/check_text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: userText })
+        });
+        
+        const data = await response.json();
+        document.getElementById("probability").innerText = data.probability + "%";
+        document.getElementById("result").classList.remove("hidden");
+    });
+</script>
+
+{% endblock %}
