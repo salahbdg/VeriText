@@ -8,11 +8,22 @@
         <label for="userText" class="block text-gray-700 font-medium">Enter your text:</label>
         <textarea id="userText" name="userText" rows="6" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Paste or write your text here..."></textarea>
         <div id="error-message" class="text-red-500 mt-2 hidden">Text cannot be empty!</div>
+        
+        <!-- New buttons for pasting text and uploading a file -->
+        <div class="flex justify-between items-center space-x-4">
+            <button type="button" id="pasteTextButton" class="w-full bg-gray-400 text-white py-2 px-4 rounded-lg hover:bg-gray-500 transition-all">Paste Text</button>
+            <label for="fileInput" class="w-full bg-gray-400 text-white py-2 px-4 rounded-lg hover:bg-gray-500 transition-all text-center cursor-pointer">Upload File</label>
+            <input type="file" id="fileInput" accept=".txt" class="hidden">
+        </div>
+
         <button type="submit" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-all">Check</button>
     </form>
+</div>
 
-    <div id="result" class="hidden mt-6">
-        <h3 class="text-xl font-semibold text-gray-800">Results:</h3>
+<div id="result" class="hidden mt-6 mx-auto w-4/5">
+    <h3 class="text-xl font-semibold text-gray-800">Results:</h3>
+    <div id="highlightedText" class="mt-4 p-3"></div>
+    <div class="mt-4">
         <p><strong>All Tokens:</strong> <span id="allTokens"></span></p>
         <p><strong>Used Tokens:</strong> <span id="usedTokens"></span></p>
         <p><strong>Real Probability:</strong> <span id="realProbability"></span></p>
@@ -23,7 +34,32 @@
     </div>
 </div>
 
+<hr class="hidden mt-6 mx-auto w-4/5 border-t border-gray-300" id="separator">
+
+<div id="historySection" class="hidden mt-6 mx-auto w-4/5">
+    <h3 class="text-xl font-semibold text-gray-800">History:</h3>
+    <ul id="historyList" class="list-disc pl-5"></ul>
+</div>
+
 <script>
+    let history = JSON.parse(localStorage.getItem('history')) || []; // Load history from local storage
+    let lastAnalyzed = JSON.parse(localStorage.getItem('lastAnalyzed')) || null; // Load last analyzed result
+
+    document.addEventListener("DOMContentLoaded", () => {
+        // Restore the last analyzed result if available
+        if (lastAnalyzed) {
+            updateResultSection(lastAnalyzed.text, lastAnalyzed.result, false);
+            document.getElementById("result").classList.remove("hidden");
+        }
+
+        // Update history section on page load
+        updateHistorySection();
+        if (history.length > 0) {
+            document.getElementById("separator").classList.remove("hidden");
+            document.getElementById("historySection").classList.remove("hidden");
+        }
+    });
+
     document.getElementById("textForm").addEventListener("submit", async function(event) {
         event.preventDefault();
         
@@ -51,15 +87,110 @@
         const data = await response.json();
 
         // Update the result section with all data
+        updateResultSection(userText, data, true);
+
+        // Update the history section (exclude the last result)
+        updateHistorySection();
+
+        document.getElementById("result").classList.remove("hidden");
+        document.getElementById("separator").classList.remove("hidden");
+        document.getElementById("historySection").classList.remove("hidden");
+    });
+
+    // Updated functionality for pasting text
+    document.getElementById("pasteTextButton").addEventListener("click", async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            document.getElementById("userText").value = text;
+        } catch (err) {
+            console.error("Failed to read clipboard contents: ", err);
+        }
+    });
+
+    // New functionality for uploading a file
+    document.getElementById("fileInput").addEventListener("change", (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            document.getElementById("userText").value = e.target.result;
+        };
+        reader.readAsText(file);
+    });
+
+    function updateResultSection(text, data, saveLastAnalyzed = true) {
+        const highlightedText = highlightLines(text, data.ai_lines);
+        const highlightedTextDiv = document.getElementById("highlightedText");
+        highlightedTextDiv.innerHTML = highlightedText;
+
+        // Apply background color based on the result
+        const isReal = data.real_probability > data.fake_probability;
+        highlightedTextDiv.style.backgroundColor = isReal ? "rgba(144, 238, 144, 0.5)" : "rgba(255, 99, 71, 0.5)";
+
         document.getElementById("allTokens").innerText = data.all_tokens;
         document.getElementById("usedTokens").innerText = data.used_tokens;
         document.getElementById("realProbability").innerText = (data.real_probability * 100).toFixed(2) + "%";
         document.getElementById("fakeProbability").innerText = (data.fake_probability * 100).toFixed(2) + "%";
         document.getElementById("perplexityScore").innerText = data.perplexity_score.toFixed(2);
         document.getElementById("burstinessScore").innerText = data.burstiness_score.toFixed(2);
-        document.getElementById("aiLines").innerText = data.ai_lines.join(", ");
+        document.getElementById("aiLines").innerText = data.ai_lines.length;
 
-        document.getElementById("result").classList.remove("hidden");
-    });
+        // Save the current result in history (temporarily exclude it from display)
+        history = history.filter(entry => entry.text !== text); // Remove duplicates
+        history.unshift({
+            text: text,
+            result: data,
+            timestamp: new Date().toLocaleString()
+        });
+
+        // Save updated history to local storage
+        localStorage.setItem('history', JSON.stringify(history));
+
+        // Save the last analyzed result separately
+        if (saveLastAnalyzed) {
+            localStorage.setItem('lastAnalyzed', JSON.stringify({ text, result: data }));
+        }
+    }
+
+    function updateHistorySection() {
+        const historyList = document.getElementById("historyList");
+        historyList.innerHTML = ""; // Clear the list
+
+        // Exclude the last result from the history display
+        const historyToDisplay = history.slice(1); // Skip the most recent result
+
+        historyToDisplay.forEach((entry, index) => {
+            const listItem = document.createElement("li");
+            const highlightedText = highlightLines(entry.text, entry.result.ai_lines);
+            const isReal = entry.result.real_probability > entry.result.fake_probability;
+            const backgroundColor = isReal ? "rgba(144, 238, 144, 0.5)" : "rgba(255, 99, 71, 0.5)";
+
+            listItem.innerHTML = `
+                <div class="mt-4 p-3" style="background-color: ${backgroundColor};">${highlightedText}</div>
+                <div class="mt-4">
+                    <p><strong>Date:</strong> ${entry.timestamp}</p>
+                    <p><strong>All Tokens:</strong> ${entry.result.all_tokens}</p>
+                    <p><strong>Used Tokens:</strong> ${entry.result.used_tokens}</p>
+                    <p><strong>Real Probability:</strong> ${(entry.result.real_probability * 100).toFixed(2)}%</p>
+                    <p><strong>Fake Probability:</strong> ${(entry.result.fake_probability * 100).toFixed(2)}%</p>
+                    <p><strong>Perplexity Score:</strong> ${entry.result.perplexity_score.toFixed(2)}</p>
+                    <p><strong>Burstiness Score:</strong> ${entry.result.burstiness_score.toFixed(2)}</p>
+                    <p><strong>AI-Generated Lines:</strong> ${entry.result.ai_lines.length}</p>
+                </div>
+            `;
+            historyList.appendChild(listItem);
+        });
+    }
+
+    function highlightLines(text, aiLines) {
+        const lines = text.split('\n');
+        return lines.map((line, index) => {
+            if (aiLines.includes(index)) {
+                return `<span style="background-color: yellow;">${line}</span>`;
+            }
+            return line;
+        }).join('<br>');
+    }
 </script>
 {% endblock %}
