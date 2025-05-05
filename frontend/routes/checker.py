@@ -11,13 +11,14 @@ def check():
 def check_text():
     data = request.get_json()
     user_text = data.get('text')
+    model_name = data.get('model', 'roberta')  # Default to 'roberta'
 
     if not user_text:
         return jsonify({'error': 'No text provided'}), 400
 
     # Call the server API
     url = "http://localhost:8080/api/check"
-    response = requests.get(url, params={"query": user_text})
+    response = requests.get(url, params={"query": user_text, "model": model_name})
 
     if response.status_code != 200:
         return jsonify({'error': 'Failed to connect to the server'}), 500

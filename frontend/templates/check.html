@@ -16,7 +16,19 @@
             <input type="file" id="fileInput" accept=".txt" class="hidden">
         </div>
 
-        <button type="submit" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-all">Check</button>
+        <!-- Updated button and select to take 100% width -->
+        <div class="flex flex-col space-y-2">
+            <button type="submit" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-all">Check</button>
+            <label for="modelSelector" class="block text-gray-700 font-medium">Select Model:</label>
+            <select id="modelSelector" class="w-full bg-gray-200 text-gray-700 py-2 px-2 rounded-lg focus:outline-none">
+                <option value="roberta">Roberta</option>
+                <option value="bert">BERT</option>
+                <option value="distilbert">DistilBERT</option>
+                <option value="xlnet">XLNet</option>
+                <option value="albert">ALBERT</option>
+                <option value="electra">ELECTRA</option>
+            </select>
+        </div>
     </form>
 </div>
 
@@ -24,6 +36,7 @@
     <h3 class="text-xl font-semibold text-gray-800">Results:</h3>
     <div id="highlightedText" class="mt-4 p-3"></div>
     <div class="mt-4">
+        <p><strong>Model Name:</strong> <span id="modelName"></span></p>
         <p><strong>All Tokens:</strong> <span id="allTokens"></span></p>
         <p><strong>Used Tokens:</strong> <span id="usedTokens"></span></p>
         <p><strong>Real Probability:</strong> <span id="realProbability"></span></p>
@@ -64,6 +77,7 @@
         event.preventDefault();
         
         const userText = document.getElementById("userText").value;
+        const selectedModel = document.getElementById("modelSelector").value;
 
         // If text is empty, show error message
         if (userText.trim() === "") {
@@ -81,7 +95,7 @@
         const response = await fetch("/check_text", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: userText })
+            body: JSON.stringify({ text: userText, model: selectedModel })
         });
         
         const data = await response.json();
@@ -128,6 +142,7 @@
         const isReal = data.real_probability > data.fake_probability;
         highlightedTextDiv.style.backgroundColor = isReal ? "rgba(144, 238, 144, 0.5)" : "rgba(255, 99, 71, 0.5)";
 
+        document.getElementById("modelName").innerText = document.getElementById("modelSelector").value;
         document.getElementById("allTokens").innerText = data.all_tokens;
         document.getElementById("usedTokens").innerText = data.used_tokens;
         document.getElementById("realProbability").innerText = (data.real_probability * 100).toFixed(2) + "%";
@@ -137,10 +152,11 @@
         document.getElementById("aiLines").innerText = data.ai_lines.length;
 
         // Save the current result in history (temporarily exclude it from display)
-        history = history.filter(entry => entry.text !== text); // Remove duplicates
+        // history = history.filter(entry => entry.text !== text); // Remove duplicates
         history.unshift({
             text: text,
             result: data,
+            model_name: document.getElementById("modelSelector").value,
             timestamp: new Date().toLocaleString()
         });
 
@@ -170,6 +186,7 @@
                 <div class="mt-4 p-3" style="background-color: ${backgroundColor};">${highlightedText}</div>
                 <div class="mt-4">
                     <p><strong>Date:</strong> ${entry.timestamp}</p>
+                    <p><strong>Model Name:</strong> ${entry.model_name}</p>
                     <p><strong>All Tokens:</strong> ${entry.result.all_tokens}</p>
                     <p><strong>Used Tokens:</strong> ${entry.result.used_tokens}</p>
                     <p><strong>Real Probability:</strong> ${(entry.result.real_probability * 100).toFixed(2)}%</p>

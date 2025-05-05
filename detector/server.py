@@ -9,10 +9,36 @@ import fire
 import torch
 from urllib.parse import urlparse, unquote, parse_qs
 import torch.nn as nn
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-model: RobertaForSequenceClassification = None
-tokenizer: RobertaTokenizer = None
 device: str = None
+
+available_models = {
+    "roberta": {
+        "tokenizer": RobertaTokenizer.from_pretrained("roberta-base"),
+        "model": RobertaForSequenceClassification.from_pretrained("roberta-base")
+    },
+    "bert": {
+        "tokenizer": AutoTokenizer.from_pretrained("bert-base-uncased"),
+        "model": AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+    },
+    "distilbert": {
+        "tokenizer": AutoTokenizer.from_pretrained("distilbert-base-uncased"),
+        "model": AutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased")
+    },
+    "xlnet": {
+        "tokenizer": AutoTokenizer.from_pretrained("xlnet-base-cased"),
+        "model": AutoModelForSequenceClassification.from_pretrained("xlnet-base-cased")
+    },
+    "albert": {
+        "tokenizer": AutoTokenizer.from_pretrained("albert-base-v2"),
+        "model": AutoModelForSequenceClassification.from_pretrained("albert-base-v2")
+    },
+    "electra": {
+        "tokenizer": AutoTokenizer.from_pretrained("google/electra-base-discriminator"),
+        "model": AutoModelForSequenceClassification.from_pretrained("google/electra-base-discriminator")
+    }
+}
 
 def log(*args):
     print(f"[{os.environ.get('RANK', '')}]", *args, file=sys.stderr)
@@ -33,22 +59,35 @@ class RequestHandler(SimpleHTTPRequestHandler):
         elif path == '/api/check':
             # Handle API request for checking text
             query = query_params.get('query', [''])[0]  # Get the 'query' parameter from URL
+            model_name = query_params.get('model', ['roberta'])[0]  # Default to 'roberta'
 
+            print(f"Received query: {query}, Model: {model_name}")
             if not query:
                 self.send_error(400, "Query parameter 'query' is required")
                 return
 
+            if model_name not in available_models:
+                self.send_error(400, f"Model '{model_name}' is not supported")
+                return
+
             self.begin_content('application/json;charset=UTF-8')
 
-            tokens = tokenizer.encode(query)
+            # Load the appropriate model
+            selected_model = available_models[model_name]["model"]
+            selected_tokenizer = available_models[model_name]["tokenizer"]
+
+            tokens = selected_tokenizer.encode(query)
             all_tokens = len(tokens)
-            tokens = tokens[:tokenizer.model_max_length - 2]
+            tokens = tokens[:selected_tokenizer.model_max_length - 2]
             used_tokens = len(tokens)
-            tokens_tensor = torch.tensor([tokenizer.bos_token_id] + tokens + [tokenizer.eos_token_id]).unsqueeze(0)
+            tokens_tensor = torch.tensor(
+                [(selected_tokenizer.bos_token_id or selected_tokenizer.cls_token_id)] + tokens +
+                [(selected_tokenizer.eos_token_id or selected_tokenizer.sep_token_id)]
+            ).unsqueeze(0)
             mask = torch.ones_like(tokens_tensor)
 
             with torch.no_grad():
-                outputs = model(tokens_tensor.to(device), attention_mask=mask.to(device))
+                outputs = selected_model(tokens_tensor.to(device), attention_mask=mask.to(device))
                 logits = outputs.logits if hasattr(outputs, 'logits') else outputs[1]
                 probs = logits.softmax(dim=-1)
                 fake, real = probs.detach().cpu().flatten().numpy().tolist()
@@ -59,13 +98,14 @@ class RequestHandler(SimpleHTTPRequestHandler):
                 else:
                     loss_fct = nn.CrossEntropyLoss()
                     labels = torch.tensor([1]).to(device)  # Assuming real label for perplexity calculation
-                    loss = loss_fct(logits.view(-1, model.config.num_labels), labels.view(-1))
+                    loss = loss_fct(logits.view(-1, selected_model.config.num_labels), labels.view(-1))
                     perplexity_score = torch.exp(loss).item()
 
                 burstiness_score = self.calculate_burstiness(probs)
 
                 # Identify AI-written sentences
-                ai_lines = self.identify_ai_sentences(query)
+                ai_lines = self.identify_ai_sentences(query, selected_model, selected_tokenizer)
+                print(f"AI lines: {ai_lines}")
 
             # Prepare and return JSON response
             response_data = dict(
@@ -78,7 +118,6 @@ class RequestHandler(SimpleHTTPRequestHandler):
                 ai_lines=ai_lines
             )
 
-            # print (response_data)
             log('Response:', response_data)
 
             self.wfile.write(json.dumps(response_data).encode())
@@ -92,23 +131,27 @@ class RequestHandler(SimpleHTTPRequestHandler):
         variance = torch.var(probs, dim=-1).mean().item()
         return variance
 
-    def identify_ai_sentences(self, text):
+    def identify_ai_sentences(self, text, selected_model, selected_tokenizer):
         sentences = text.split('\n')
         ai_lines = []
         for i, sentence in enumerate(sentences):
             if not sentence.strip():  # Skip empty lines
                 continue
 
-            tokens = tokenizer.encode(sentence)
-            tokens_tensor = torch.tensor([tokenizer.bos_token_id] + tokens + [tokenizer.eos_token_id]).unsqueeze(0)
+            tokens = selected_tokenizer.encode(sentence)
+            tokens_tensor = torch.tensor(
+                [(selected_tokenizer.bos_token_id or selected_tokenizer.cls_token_id)] + tokens +
+                [(selected_tokenizer.eos_token_id or selected_tokenizer.sep_token_id)]
+            ).unsqueeze(0)
             mask = torch.ones_like(tokens_tensor)
 
             with torch.no_grad():
-                outputs = model(tokens_tensor.to(device), attention_mask=mask.to(device))
+                outputs = selected_model(tokens_tensor.to(device), attention_mask=mask.to(device))
                 logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
                 sentence_probs = logits.softmax(dim=-1)
                 fake, real = sentence_probs.detach().cpu().flatten().numpy().tolist()
 
+                print(f"Sentence: {sentence}, Fake: {fake}, Real: {real}")
                 if fake > real:
                     ai_lines.append(i)
         return ai_lines
@@ -122,10 +165,13 @@ class RequestHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         log(format % args)
 
-def serve_forever(server, model, tokenizer, device):
-    log('Process has started; loading the model ...')
-    globals()['model'] = model.to(device)
-    globals()['tokenizer'] = tokenizer
+def serve_forever(server, device, checkpoint):
+    log('Process has started; loading models...')
+    for model_name, components in available_models.items():
+        components["model"] = components["model"].to(device)
+        data = torch.load(checkpoint, map_location='cpu')
+        components["model"].load_state_dict(data['model_state_dict'], strict=False)
+        components["model"].eval()
     globals()['device'] = device
 
     log(f'Ready to serve at http://localhost:{server.server_address[1]}')
@@ -139,14 +185,14 @@ def main(checkpoint, port=8080, device='cuda' if torch.cuda.is_available() else 
         assert os.path.isfile(checkpoint)
 
     print(f'Loading checkpoint from {checkpoint}')
-    data = torch.load(checkpoint, map_location='cpu')
+    # data = torch.load(checkpoint, map_location='cpu')
 
-    model_name = 'roberta-large' if data['args']['large'] else 'roberta-base'
-    model = RobertaForSequenceClassification.from_pretrained(model_name)
-    tokenizer = RobertaTokenizer.from_pretrained(model_name)
+    # model_name = 'roberta-large' if data['args']['large'] else 'roberta-base'
+    # model = RobertaForSequenceClassification.from_pretrained(model_name)
+    # tokenizer = RobertaTokenizer.from_pretrained(model_name)
 
-    model.load_state_dict(data['model_state_dict'], strict=False)
-    model.eval()
+    # model.load_state_dict(data['model_state_dict'], strict=False)
+    # model.eval()
 
     print(f'Starting HTTP server on port {port}', file=sys.stderr)
     server = HTTPServer(('0.0.0.0', port), RequestHandler)
@@ -155,7 +201,7 @@ def main(checkpoint, port=8080, device='cuda' if torch.cuda.is_available() else 
     num_workers = int(subprocess.check_output([sys.executable, '-c', 'import torch; print(torch.cuda.device_count())']))
 
     if num_workers <= 1:
-        serve_forever(server, model, tokenizer, device)
+        serve_forever(server, device, checkpoint)
     else:
         print(f'Launching {num_workers} worker processes...')
 
@@ -164,7 +210,7 @@ def main(checkpoint, port=8080, device='cuda' if torch.cuda.is_available() else 
         for i in range(num_workers):
             os.environ['RANK'] = f'{i}'
             os.environ['CUDA_VISIBLE_DEVICES'] = f'{i}'
-            process = Process(target=serve_forever, args=(server, model, tokenizer, device))
+            process = Process(target=serve_forever, args=(server, device, checkpoint))
             process.start()
             subprocesses.append(process)
 
@@ -176,4 +222,3 @@ def main(checkpoint, port=8080, device='cuda' if torch.cuda.is_available() else 
 
 if __name__ == '__main__':
     fire.Fire(main)
-    
