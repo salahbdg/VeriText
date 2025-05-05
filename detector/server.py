@@ -10,6 +10,7 @@ import torch
 from urllib.parse import urlparse, unquote, parse_qs
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 device: str = None
 
@@ -39,6 +40,12 @@ available_models = {
         "model": AutoModelForSequenceClassification.from_pretrained("google/electra-base-discriminator")
     }
 }
+
+# Load GPT-2 model and tokenizer
+gpt2_model_name = 'gpt2'
+gpt2_model = GPT2LMHeadModel.from_pretrained(gpt2_model_name)
+gpt2_tokenizer = GPT2Tokenizer.from_pretrained(gpt2_model_name)
+gpt2_model.eval()
 
 def log(*args):
     print(f"[{os.environ.get('RANK', '')}]", *args, file=sys.stderr)
@@ -104,8 +111,8 @@ class RequestHandler(SimpleHTTPRequestHandler):
                 burstiness_score = self.calculate_burstiness(probs)
 
                 # Identify AI-written sentences
-                ai_lines = self.identify_ai_sentences(query, selected_model, selected_tokenizer)
-                print(f"AI lines: {ai_lines}")
+                ai_lines, word_probabilities = self.identify_ai_sentences(query, selected_model, selected_tokenizer)
+                print(f"AI lines: {ai_lines}, Word Probabilities: {word_probabilities}")
 
             # Prepare and return JSON response
             response_data = dict(
@@ -115,7 +122,8 @@ class RequestHandler(SimpleHTTPRequestHandler):
                 fake_probability=fake,
                 perplexity_score=perplexity_score,
                 burstiness_score=burstiness_score,
-                ai_lines=ai_lines
+                ai_lines=ai_lines,
+                word_probabilities=word_probabilities  # Include word probabilities in the response
             )
 
             log('Response:', response_data)
@@ -134,6 +142,8 @@ class RequestHandler(SimpleHTTPRequestHandler):
     def identify_ai_sentences(self, text, selected_model, selected_tokenizer):
         sentences = text.split('\n')
         ai_lines = []
+        word_probs = []  # Store word probabilities for the entire text
+
         for i, sentence in enumerate(sentences):
             if not sentence.strip():  # Skip empty lines
                 continue
@@ -154,7 +164,35 @@ class RequestHandler(SimpleHTTPRequestHandler):
                 print(f"Sentence: {sentence}, Fake: {fake}, Real: {real}")
                 if fake > real:
                     ai_lines.append(i)
-        return ai_lines
+
+                    # Analyze word probabilities using GPT-2
+                    word_probs.extend(self.analyze_word_probabilities(sentence))
+
+        # Sort by probability in descending order and return the top 10
+        top_word_probs = sorted(word_probs, key=lambda x: x["probability"], reverse=True)[:10]
+        return ai_lines, top_word_probs
+
+    def analyze_word_probabilities(self, sentence):
+        words = sentence.split()
+        word_probs = []
+
+        for j, word in enumerate(words):
+            context = " ".join(words[:j])  # Context is all words before the current word
+            input_text = context + " " + word
+            input_ids = gpt2_tokenizer.encode(input_text, return_tensors='pt')
+
+            with torch.no_grad():
+                outputs = gpt2_model(input_ids)
+                logits = outputs.logits
+
+            softmax = torch.nn.Softmax(dim=-1)
+            probs = softmax(logits)
+
+            target_id = gpt2_tokenizer.encode(word, add_special_tokens=False)[0]
+            target_prob = probs[0, -1, target_id].item()
+            word_probs.append({"word": word, "probability": round(target_prob * 100, 2)})
+
+        return word_probs
 
     def begin_content(self, content_type):
         self.send_response(200)

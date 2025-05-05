@@ -35,15 +35,49 @@
 <div id="result" class="hidden mt-6 mx-auto w-4/5">
     <h3 class="text-xl font-semibold text-gray-800">Results:</h3>
     <div id="highlightedText" class="mt-4 p-3"></div>
-    <div class="mt-4">
-        <p><strong>Model Name:</strong> <span id="modelName"></span></p>
-        <p><strong>All Tokens:</strong> <span id="allTokens"></span></p>
-        <p><strong>Used Tokens:</strong> <span id="usedTokens"></span></p>
-        <p><strong>Real Probability:</strong> <span id="realProbability"></span></p>
-        <p><strong>Fake Probability:</strong> <span id="fakeProbability"></span></p>
-        <p><strong>Perplexity Score:</strong> <span id="perplexityScore"></span></p>
-        <p><strong>Burstiness Score:</strong> <span id="burstinessScore"></span></p>
-        <p><strong>AI-Generated Lines:</strong> <span id="aiLines"></span></p>
+    <p class="text-center text-gray-700 mt-2">Analyzed with <strong id="modelName"></strong> model</p>
+    <div class="grid grid-cols-3 gap-4 mt-4">
+        <!-- Stats Panel -->
+        <div class="grid grid-cols-2 gap-4">
+            <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                <p class="text-sm font-medium text-gray-600">All Tokens</p>
+                <p id="allTokens" class="text-lg font-semibold text-gray-800"></p>
+            </div>
+            <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                <p class="text-sm font-medium text-gray-600">Used Tokens</p>
+                <p id="usedTokens" class="text-lg font-semibold text-gray-800"></p>
+                <p id="usedTokensPercentage" class="text-sm font-medium text-gray-600"></p>
+            </div>
+            <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                <p class="text-sm font-medium text-gray-600">Perplexity</p>
+                <p id="perplexityScore" class="text-lg font-semibold text-gray-800"></p>
+                <p id="perplexityLevel" class="text-sm font-medium text-gray-600"></p>
+            </div>
+            <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                <p class="text-sm font-medium text-gray-600">Burstiness</p>
+                <p id="burstinessScore" class="text-lg font-semibold text-gray-800"></p>
+                <p id="burstinessLabel" class="text-sm font-medium text-gray-600"></p>
+            </div>
+        </div>
+        <div class="grid grid-cols-1">
+            <!-- AI Lines Info -->
+            <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                <p class="text-sm font-medium text-gray-600">AI-Generated Lines</p>
+                <p id="aiLines" class="text-lg font-semibold text-gray-800"></p>
+                <p class="text-sm font-small text-gray-600 mt-2">Highlighted in the text</p>
+            </div>
+            <!-- Top 10 Word Probabilities Section -->
+            <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center mt-4">
+                <p class="text-sm font-medium text-gray-600">Top 10 Word Probabilities</p>
+                <canvas id="wordProbabilitiesChart" width="400" height="300"></canvas>
+            </div>
+        </div>
+        <!-- Diagram -->
+        <div class="p-4 bg-gray-100 rounded-lg text-center">
+            <canvas id="aiHumanChart" width="100" height="100"></canvas>
+            <p id="chartResult" class="text-xl font-bold text-gray-800 mt-4"></p>
+            <p class="text-sm font-medium text-gray-600 mt-2">AI: <span id="aiPercentage"></span>% | Human: <span id="humanPercentage"></span>%</p>
+        </div>
     </div>
 </div>
 
@@ -54,9 +88,12 @@
     <ul id="historyList" class="list-disc pl-5"></ul>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     let history = JSON.parse(localStorage.getItem('history')) || []; // Load history from local storage
     let lastAnalyzed = JSON.parse(localStorage.getItem('lastAnalyzed')) || null; // Load last analyzed result
+    let aiHumanChartInstance = null; // Store the chart instance
+    let wordProbabilitiesChartInstance = null; // Store the chart instance for word probabilities
 
     document.addEventListener("DOMContentLoaded", () => {
         // Restore the last analyzed result if available
@@ -103,6 +140,9 @@
         // Update the result section with all data
         updateResultSection(userText, data, true);
 
+        // Scroll to the results section
+        document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+
         // Update the history section (exclude the last result)
         updateHistorySection();
 
@@ -138,32 +178,123 @@
         const highlightedTextDiv = document.getElementById("highlightedText");
         highlightedTextDiv.innerHTML = highlightedText;
 
-        // Apply background color based on the result
-        const isReal = data.real_probability > data.fake_probability;
-        highlightedTextDiv.style.backgroundColor = isReal ? "rgba(144, 238, 144, 0.5)" : "rgba(255, 99, 71, 0.5)";
+        // Apply light grey background to the text
+        highlightedTextDiv.style.backgroundColor = "rgba(211, 211, 211, 0.5)";
 
-        document.getElementById("modelName").innerText = document.getElementById("modelSelector").value;
+        const modelName = document.getElementById("modelSelector").value;
+        document.getElementById("modelName").innerText = modelName;
         document.getElementById("allTokens").innerText = data.all_tokens;
         document.getElementById("usedTokens").innerText = data.used_tokens;
-        document.getElementById("realProbability").innerText = (data.real_probability * 100).toFixed(2) + "%";
-        document.getElementById("fakeProbability").innerText = (data.fake_probability * 100).toFixed(2) + "%";
-        document.getElementById("perplexityScore").innerText = data.perplexity_score.toFixed(2);
-        document.getElementById("burstinessScore").innerText = data.burstiness_score.toFixed(2);
-        document.getElementById("aiLines").innerText = data.ai_lines.length;
 
-        // Save the current result in history (temporarily exclude it from display)
-        // history = history.filter(entry => entry.text !== text); // Remove duplicates
+        // Update used tokens percentage
+        const usedTokensPercentage = ((data.used_tokens / data.all_tokens) * 100).toFixed(0) + "%";
+        document.getElementById("usedTokensPercentage").innerText = usedTokensPercentage;
+
+        // Update perplexity and its level
+        const perplexity = data.perplexity_score.toFixed(2);
+        document.getElementById("perplexityScore").innerText = perplexity;
+        document.getElementById("perplexityLevel").innerText = perplexity > 100 ? "High" : perplexity < 50 ? "Low" : "Medium";
+
+        // Update burstiness as a percentage
+        document.getElementById("burstinessScore").innerText = (data.burstiness_score * 100).toFixed(2) + "%";
+
+        // Update burstiness label
+        const burstinessLabel = data.burstiness_score < 0.5 ? "more AI" : "more human";
+        document.getElementById("burstinessLabel").innerText = burstinessLabel;
+
+        document.getElementById("aiLines").innerText = `${data.ai_lines.length} / ${text.split('\n').length}`;
+
+        const aiPercentage = (data.fake_probability * 100).toFixed(2);
+        const humanPercentage = (data.real_probability * 100).toFixed(2);
+        document.getElementById("aiPercentage").innerText = aiPercentage;
+        document.getElementById("humanPercentage").innerText = humanPercentage;
+
+        // Display the result prominently in the chart
+        document.getElementById("chartResult").innerText = aiPercentage > humanPercentage ? "AI Text" : "Human Text";
+
+        // Render the diagram
+        const ctx = document.getElementById("aiHumanChart").getContext("2d");
+
+        // Destroy the previous chart instance if it exists
+        if (aiHumanChartInstance) {
+            aiHumanChartInstance.destroy();
+        }
+
+        // Create a new chart instance
+        aiHumanChartInstance = new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: ["AI", "Human"],
+                datasets: [{
+                    data: [aiPercentage, humanPercentage],
+                    backgroundColor: ["#FF6347", "#90EE90"]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: true, position: "top" }
+                }
+            }
+        });
+
+        // Render histogram for top 10 word probabilities
+        const wordProbabilitiesChart = document.getElementById("wordProbabilitiesChart").getContext("2d");
+
+        // Destroy the previous chart instance if it exists
+        if (wordProbabilitiesChartInstance) {
+            wordProbabilitiesChartInstance.destroy();
+        }
+
+        if (Array.isArray(data.word_probabilities)) {
+            const words = data.word_probabilities.map(({ word }) => word);
+            const probabilities = data.word_probabilities.map(({ probability }) => probability);
+
+            wordProbabilitiesChartInstance = new Chart(wordProbabilitiesChart, {
+                type: "bar",
+                data: {
+                    labels: words,
+                    datasets: [{
+                        label: "Probability (%)",
+                        data: probabilities,
+                        backgroundColor: "rgba(54, 162, 235, 0.6)",
+                        borderColor: "rgba(54, 162, 235, 1)",
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: "Words"
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: "Probability (%)"
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Save the current result in history
         history.unshift({
             text: text,
             result: data,
-            model_name: document.getElementById("modelSelector").value,
+            model_name: modelName,
             timestamp: new Date().toLocaleString()
         });
-
-        // Save updated history to local storage
         localStorage.setItem('history', JSON.stringify(history));
 
-        // Save the last analyzed result separately
         if (saveLastAnalyzed) {
             localStorage.setItem('lastAnalyzed', JSON.stringify({ text, result: data }));
         }
@@ -176,27 +307,81 @@
         // Exclude the last result from the history display
         const historyToDisplay = history.slice(1); // Skip the most recent result
 
-        historyToDisplay.forEach((entry, index) => {
+        historyToDisplay.forEach((entry) => {
             const listItem = document.createElement("li");
             const highlightedText = highlightLines(entry.text, entry.result.ai_lines);
-            const isReal = entry.result.real_probability > entry.result.fake_probability;
-            const backgroundColor = isReal ? "rgba(144, 238, 144, 0.5)" : "rgba(255, 99, 71, 0.5)";
+            const backgroundColor = "rgba(211, 211, 211, 0.5)";
 
             listItem.innerHTML = `
                 <div class="mt-4 p-3" style="background-color: ${backgroundColor};">${highlightedText}</div>
-                <div class="mt-4">
-                    <p><strong>Date:</strong> ${entry.timestamp}</p>
-                    <p><strong>Model Name:</strong> ${entry.model_name}</p>
-                    <p><strong>All Tokens:</strong> ${entry.result.all_tokens}</p>
-                    <p><strong>Used Tokens:</strong> ${entry.result.used_tokens}</p>
-                    <p><strong>Real Probability:</strong> ${(entry.result.real_probability * 100).toFixed(2)}%</p>
-                    <p><strong>Fake Probability:</strong> ${(entry.result.fake_probability * 100).toFixed(2)}%</p>
-                    <p><strong>Perplexity Score:</strong> ${entry.result.perplexity_score.toFixed(2)}</p>
-                    <p><strong>Burstiness Score:</strong> ${entry.result.burstiness_score.toFixed(2)}</p>
-                    <p><strong>AI-Generated Lines:</strong> ${entry.result.ai_lines.length}</p>
+                <p class="text-center font-medium text-gray-600">Analyzed with <strong>${entry.model_name}</strong> model (${entry.timestamp})</p>
+                <div class="grid grid-cols-3 gap-4 mt-4">
+                    <!-- Stats Panel -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                            <p class="text-sm font-medium text-gray-600">All Tokens</p>
+                            <p class="text-lg font-semibold text-gray-800">${entry.result.all_tokens}</p>
+                        </div>
+                        <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                            <p class="text-sm font-medium text-gray-600">Used Tokens</p>
+                            <p class="text-lg font-semibold text-gray-800">${entry.result.used_tokens}</p>
+                            <p class="text-sm font-medium text-gray-600">${((entry.result.used_tokens / entry.result.all_tokens) * 100).toFixed(0)}%</p>
+                        </div>
+                        <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                            <p class="text-sm font-medium text-gray-600">Perplexity</p>
+                            <p class="text-lg font-semibold text-gray-800">${entry.result.perplexity_score.toFixed(2)}</p>
+                            <p class="text-sm font-medium text-gray-600">${entry.result.perplexity_score > 100 ? "High" : entry.result.perplexity_score < 50 ? "Low" : "Medium"}</p>
+                        </div>
+                        <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                            <p class="text-sm font-medium text-gray-600">Burstiness</p>
+                            <p class="text-lg font-semibold text-gray-800">${(entry.result.burstiness_score * 100).toFixed(0)}%</p>
+                            <p class="text-sm font-medium text-gray-600">${entry.result.burstiness_score < 0.5 ? "more AI" : "more human"}</p>
+                        </div>
+                    </div>
+                    <!-- AI Lines Info -->
+                    <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                        <p class="text-sm font-medium text-gray-600">AI-Generated Lines</p>
+                        <p class="text-lg font-semibold text-gray-800">${entry.result.ai_lines.length} / ${entry.text.split('\n').length}</p>
+                        <p class="text-sm font-small text-gray-600 mt-2">Highlighted in the text</p>
+                        <div class="mt-4 text-left">
+                            ${
+                                Array.isArray(entry.result.word_probabilities)
+                                    ? entry.result.word_probabilities.map(({ word, probability }) => `
+                                        <p class="text-sm font-medium text-gray-600 mt-4">"${word}": ${probability}%</p>
+                                    `).join('')
+                                    : ''
+                            }
+                        </div>
+                    </div>
+                    <!-- Diagram -->
+                    <div class="p-4 bg-gray-100 rounded-lg text-center">
+                        <canvas id="historyChart-${entry.timestamp}" width="100" height="100"></canvas>
+                        <p class="text-xl font-bold text-gray-800 mt-4">${entry.result.fake_probability > entry.result.real_probability ? "AI Text" : "Human Text"}</p>
+                        <p class="text-sm font-medium text-gray-600 mt-2">AI: ${(entry.result.fake_probability * 100).toFixed(2)}% | Human: ${(entry.result.real_probability * 100).toFixed(2)}%</p>
+                    </div>
                 </div>
             `;
+
             historyList.appendChild(listItem);
+
+            // Render the diagram for each history entry
+            const ctx = document.getElementById(`historyChart-${entry.timestamp}`).getContext("2d");
+            new Chart(ctx, {
+                type: "doughnut",
+                data: {
+                    labels: ["AI", "Human"],
+                    datasets: [{
+                        data: [(entry.result.fake_probability * 100).toFixed(2), (entry.result.real_probability * 100).toFixed(2)],
+                        backgroundColor: entry.result.fake_probability > entry.result.real_probability ? ["#FF6347", "#90EE90"] : ["#90EE90", "#FF6347"]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: true, position: "top" }
+                    }
+                }
+            });
         });
     }
 
