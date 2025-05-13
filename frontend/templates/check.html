@@ -85,7 +85,7 @@
 
 <div id="historySection" class="hidden mt-6 mx-auto w-4/5">
     <h3 class="text-xl font-semibold text-gray-800">History:</h3>
-    <ul id="historyList" class="list-disc pl-5"></ul>
+    <ul id="historyList"></ul>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -307,7 +307,7 @@
         // Exclude the last result from the history display
         const historyToDisplay = history.slice(1); // Skip the most recent result
 
-        historyToDisplay.forEach((entry) => {
+        historyToDisplay.forEach((entry, index) => {
             const listItem = document.createElement("li");
             const highlightedText = highlightLines(entry.text, entry.result.ai_lines);
             const backgroundColor = "rgba(211, 211, 211, 0.5)";
@@ -338,19 +338,17 @@
                             <p class="text-sm font-medium text-gray-600">${entry.result.burstiness_score < 0.5 ? "more AI" : "more human"}</p>
                         </div>
                     </div>
-                    <!-- AI Lines Info -->
-                    <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
-                        <p class="text-sm font-medium text-gray-600">AI-Generated Lines</p>
-                        <p class="text-lg font-semibold text-gray-800">${entry.result.ai_lines.length} / ${entry.text.split('\n').length}</p>
-                        <p class="text-sm font-small text-gray-600 mt-2">Highlighted in the text</p>
-                        <div class="mt-4 text-left">
-                            ${
-                                Array.isArray(entry.result.word_probabilities)
-                                    ? entry.result.word_probabilities.map(({ word, probability }) => `
-                                        <p class="text-sm font-medium text-gray-600 mt-4">"${word}": ${probability}%</p>
-                                    `).join('')
-                                    : ''
-                            }
+                    <div class="grid grid-cols-1">        
+                        <!-- AI Lines Info -->
+                        <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center">
+                            <p class="text-sm font-medium text-gray-600">AI-Generated Lines</p>
+                            <p class="text-lg font-semibold text-gray-800">${entry.result.ai_lines.length} / ${entry.text.split('\n').length}</p>
+                            <p class="text-sm font-small text-gray-600 mt-2">Highlighted in the text</p>
+                        </div>
+                        <!-- Top 10 Word Probabilities Section -->
+                        <div class="p-4 bg-gray-100 rounded-lg text-center flex flex-col items-center justify-center mt-4">
+                            <p class="text-sm font-medium text-gray-600">Top 10 Word Probabilities</p>
+                            <canvas id="historyWordProbabilitiesChart-${index}" width="400" height="300"></canvas>
                         </div>
                     </div>
                     <!-- Diagram -->
@@ -382,6 +380,48 @@
                     }
                 }
             });
+
+            // Render the bar chart for top 10 word probabilities
+            const wordProbabilitiesChart = document.getElementById(`historyWordProbabilitiesChart-${index}`).getContext("2d");
+            if (Array.isArray(entry.result.word_probabilities)) {
+                const words = entry.result.word_probabilities.map(({ word }) => word);
+                const probabilities = entry.result.word_probabilities.map(({ probability }) => probability);
+
+                new Chart(wordProbabilitiesChart, {
+                    type: "bar",
+                    data: {
+                        labels: words,
+                        datasets: [{
+                            label: "Probability (%)",
+                            data: probabilities,
+                            backgroundColor: "rgba(54, 162, 235, 0.6)",
+                            borderColor: "rgba(54, 162, 235, 1)",
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: "Words"
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: "Probability (%)"
+                                }
+                            }
+                        }
+                    }
+                });
+            }
         });
     }
 
